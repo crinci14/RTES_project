@@ -31,7 +31,9 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 	this->transient_local = transient_local;
 	this->time = time;
 
+	this->active_threads = 0; 
 	this->queue_mex = (struct element<T>*)malloc(this->dim*sizeof(struct element<T>)); // coda di strutture
+	this->next_pop = (int*)malloc(this->num_threads*sizeof(int));
 	this->head = 0;
 	this->tail = 0;
 	this->empty = (sem_t*)malloc(this->num_threads*sizeof(sem_t));
@@ -50,6 +52,7 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 
 	for (int i = 0; i < this->num_threads; i++)
 	{
+		this->next_pop[i] = 0;
 		for (int j = 0; i < this->dim; i++)
 			this->taken_mex[i][j] = 0; 
 	}
@@ -61,5 +64,57 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 	for (int i = 0; i < num_threads; i++)
 		sem_init(&this->empty[i], 0, 0);
 
+
+}
+
+
+//Distruttore
+
+template<class T>
+Queue_mex<T>::~Queue_mex(){}
+
+
+//dato il messaggio all'interno della coda ci dice se tutti i thread che ne hanno diritto lo hanno ricevuto
+// se il vettore è di tutti 1 allora lo hanno preso tutti i threads che ne avevano il diritto
+bool Queue_mex<T>::taken_all(int mex)
+{
+	bool finish;
+	int controllo = 1;
+	for (int i = 0; i < this->num_threads; i++)
+		controllo = controllo * this->taken_mex[i][mex];
+
+	(controllo == 0) ? finish = false : finish = true;
+		
+	return finish;
+}
+
+// pop del messaggio parametrica del thread specifico
+struct elemento Queue_mex<T>::pop_mex(int tid)
+{
+	//controllo se ci sono messaggi da leggere
+	int i = sem_trywait(&this->empty[tid]);
+	if (i == -1)
+	{
+		cout << tid << ": per il thread non ci sono messaggi da leggere" << endl;// cout utile per il debug
+		return NULL;
+	}
+
+	//ho almeno un messaggo da prendere, quindi next_pop indicherà sempre il primo messaggio disponibile
+	sem_wait(&this->mutex);
+	
+	struct elemento ret;
+	ret = this->queue_mex[this->next_pop[tid]];
+	this->taken_mex[tid][this->next_pop[tid]] = 1;
+	if (taken_all(this->next_pop[tid]))
+	{
+		
+		sem_post(&this->full);
+	}
+	this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
+
+	sem_wait(&this->mutex);
+
+	return ret;
+	
 
 }
