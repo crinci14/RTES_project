@@ -56,6 +56,9 @@ private:
 	int tail;//primo dei messaggi inseriti ancora in coda
 	bool **taken_mex; // matrice che indica i messaggi presi (matrice thread/messaggio)
 	int *next_pop;//indica, per ogni threads, qual è il prossimo messaggio da prendere nella coda
+	int num_mex_wait;//ci dice quanti messaggi sono presi da tutti ma non è ancora scaduto il tempo di late join
+	int *vett_mex_wait;//collegato a num_mex_wait ci dice quali messaggi sono in questa situazione
+
 	sem_t *empty;//un semaforo per ogni thread, ci dice se per quel thread c'è o no un messaggio da prendere
 	sem_t full;// ci si bloccano i thread che effettuano la push e non c'è spazio in coda 
 	sem_t mutex;// semaforo di mutua esclusione nell'accesso alla coda e a variabili usate da tutti

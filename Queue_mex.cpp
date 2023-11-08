@@ -42,16 +42,22 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 	this->tail = 0;
 	this->empty = (sem_t*)malloc(this->num_threads*sizeof(sem_t));
 	//allocazione dinamica della matrice
-	this->taken_mex = (bool**)malloc(this->num_threads*sizeof(bool*));
-	for (int i = 0; i < this->num_threads; i++)
-		this->taken_mex[i] = (bool*)malloc(this->dim*sizeof(bool));
+	this->taken_mex = (bool**)malloc(this->num_threads*sizeof(bool*));		
 
 	for (int i = 0; i < this->num_threads; i++)
 	{
+		this->taken_mex[i] = (bool*)malloc(this->dim*sizeof(bool));
 		this->next_pop[i] = 0;
 		for (int j = 0; j < this->dim; j++)
 			this->taken_mex[i][j] = false; 
 	}
+
+	this->mex_wait = false;
+	this->num_mex_wait = 0;
+	this->vett_mex_wait = (int*)malloc(this->dim*sizeof(int));
+	for (int i = 0; i < this->dim; i++)
+		this->vett_mex_wait[i] = 0;
+		
 
 	//inizializzo semafori
 
@@ -80,13 +86,22 @@ int Queue_mex<T>::init_th()
 	this->arrivals[tid] = chrono::steady_clock::now();//segno l'ora di join del thread
 	
 	// nel momento dell'inserimento del messaggio viene inserito come già preso da parte di un thread non ancora arrivato
+	// e se sono ancora in tempo questo va modificato
 	for (int i = 0; i < messaggi; i++)
 	{
 		int index = (this->tail + i) % this->dim;
 		const auto diff = chrono::duration_cast<chrono::milliseconds>(arrivals[tid] - queue_mex[index].time).count();
 		
 		if (diff <= this->time)
+		{
+			if (this->vett_mex_wait[index] == 1)
+			{// azzero i contattori
+				this->num_mex_wait--;
+				this->vett_mex_wait[this->next_pop[tid]] = 0;
+
+			}
 			this->taken_mex[tid][index] = false;
+		}
 	}
 
 	sem_post(&this->mutex);
@@ -130,12 +145,21 @@ struct elemento Queue_mex<T>::pop_mex(int tid)
 	ret = this->queue_mex[this->next_pop[tid]];
 	this->taken_mex[tid][this->next_pop[tid]] = true;
 	const auto diff = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - queue_mex[this->next_pop[tid]].time).count();
-	if (taken_all(this->next_pop[tid]) && diff > this->time)
+	if (taken_all(this->next_pop[tid]))
 	{   
-		//il più vecchio messaggio che è ancora in coda è stato preso da tutti i thread ed è anche passato il tempo di late join
-		this->num_mex--;
-		this->tail++;
-		sem_post(&this->full);
+		//// imposto le variabili di controllo
+		this->num_mex_wait++;
+		this->vett_mex_wait[this->next_pop[tid]] = 1;
+		if (this->active_threads == this->num_threads || diff > this->time)
+		{
+			//il più vecchio messaggio che è ancora in coda è stato preso da tutti i thread ed è anche passato il tempo di late join o sono già arrivati tutti i threads.
+			this->num_mex_wait--;
+			this->vett_mex_wait[this->next_pop[tid]] = 0;
+
+			this->num_mex--;
+			this->tail++;
+			sem_post(&this->full);
+		}
 	}
 	this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
 
