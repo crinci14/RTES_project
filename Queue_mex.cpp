@@ -73,7 +73,18 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 //Distruttore
 
 template<class T>
-Queue_mex<T>::~Queue_mex(){}
+Queue_mex<T>::~Queue_mex()
+{
+	delete this->queue_mex;
+	delete this->arrivals;
+	delete this->next_pop;
+	delete this->empty;
+	delete this->vett_mex_wait;
+
+	for (int i = 0; i < this->num_threads; i++)
+		delete this->taken_mex[i];
+	delete this->taken_mex;
+}
 
 
 
