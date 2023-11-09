@@ -36,7 +36,7 @@ public:
 
 	int init_th();
 	struct elemento pop_mex(int tid);// non bloccante anche se il thread non ha elementi da prendere in coda
-	void push_mex(struct elemento message);// bloccante se la coda è piena
+	void push_mex(struct elemento message, int tid);// bloccante se la coda è piena
 
 	bool is_full(); //per gli inserimenti
 	
@@ -44,7 +44,7 @@ public:
 private:
 
 	size_t dim;
-	bool transient_local;
+	bool transient_local;// il transient_local da il diritto a un thread che arriva dopo (in base a quanto dice time) al messaggio di poterlo leggere
 	int time;// in millisecondi
 	int num_thread;// threads totali
 	int active_threads;//threads attivi al momento

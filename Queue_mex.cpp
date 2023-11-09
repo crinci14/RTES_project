@@ -87,20 +87,20 @@ int Queue_mex<T>::init_th()
 	
 	// nel momento dell'inserimento del messaggio viene inserito come già preso da parte di un thread non ancora arrivato
 	// e se sono ancora in tempo questo va modificato
-	for (int i = 0; i < messaggi; i++)
+	for (int i = 0; i < this->num_mex; i++)
 	{
 		int index = (this->tail + i) % this->dim;
-		const auto diff = chrono::duration_cast<chrono::milliseconds>(arrivals[tid] - queue_mex[index].time).count();
+		const auto diff = chrono::duration_cast<chrono::milliseconds>(this->arrivals[tid] - this->queue_mex[index].time).count();
 		
 		if (diff <= this->time)
 		{
 			if (this->vett_mex_wait[index] == 1)
-			{// azzero i contattori
+			{// modifico le variabili
 				this->num_mex_wait--;
-				this->vett_mex_wait[this->next_pop[tid]] = 0;
-
+				this->vett_mex_wait[index] = 0;
 			}
 			this->taken_mex[tid][index] = false;
+			sem_post(&this->empty[tid]);
 		}
 	}
 
@@ -157,7 +157,7 @@ struct elemento Queue_mex<T>::pop_mex(int tid)
 			this->vett_mex_wait[this->next_pop[tid]] = 0;
 
 			this->num_mex--;
-			this->tail++;
+			this->tail = (this->tail + 1) % this->dim;
 			sem_post(&this->full);
 		}
 	}
@@ -166,4 +166,61 @@ struct elemento Queue_mex<T>::pop_mex(int tid)
 	sem_post(&this->mutex);
 
 	return ret;
+}
+
+////inserimento messaggio nella coda, è bloccante con coda piena
+template<class T>
+void Queue_mex<T>::push_mex(struct elemento message, int tid)
+{
+	sem_wait(&this->mutex);
+
+	if (this->num_mex_wait > 0)
+	{///// ci potrebbero essere dei messaggi vecchi da cancellare che possono sbloccare delle push
+
+		chrono::steady_clock::time_point now = chrono::steady_clock::now();
+		int tail = this->tail;
+		int num_mex_wait = this->num_mex_wait;
+		for (int i = 0; i < num_mex_wait; i++)
+		{
+			int index = (tail + i) % this->dim;
+			const auto diff = chrono::duration_cast<chrono::milliseconds>(now - queue_mex[index].time).count();
+			if (diff > this->time)
+			{
+				this->num_mex_wait--;
+				this->vett_mex_wait[index] = 0;
+
+				this->num_mex--;
+				this->tail = (this->tail + 1) % this->dim;
+				sem_post(&this->full);
+			}
+
+		}
+	}
+
+	// se mi devo bloccare devo rilasciare prima il mutex
+	if (this->num_mex == this->dim)
+	{
+		sem_post(&this->mutex);
+		sem_wait(&this->full);
+		sem_wait(&this->mutex);
+	}
+	else sem_wait(this->full);
+
+	this->queue_mex[this->head] = message;
+	this->num_mex++;
+
+	for (int i = 0; i < this->num_threads; i++)
+	{
+		if (i < this->active_threads && i != tid)
+		{
+			this->taken_mex[i][this->head] = false;
+			sem_post(&this->empty[i]);
+		}
+		else
+			this->taken_mex[i][this->head] = true;
+	}
+	this->head = (this->head + 1) % this->dim;
+
+	sem_post(&this->mutex);
+	return;
 }
