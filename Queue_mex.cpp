@@ -2,25 +2,26 @@
 #include <stdlib.h>
 #include "Queue_mex.h"
 #include <unistd.h>
-#include <chrono>
 
 using namespace std;
 
 // Costruttore
 template<class T>
-Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int time){
-	if (dim <= 0)
-	{
-		cout << "Dimensione coda non accettata(minimo 1)." << endl;
-		return;
-	}
+Queue_mex<T>::Queue_mex(size_t dim, int num_threads, bool transient_local, int time)
+{
 	if (num_threads <= 1)
 	{
 		cout << "Numero Thread non accettato(minimo 2)." << endl;
 		return;
 	}
+	
+	if (dim < 2*num_threads)
+	{
+		cout << "Dimensione coda non accettata(minimo il doppio del numero dei threads)." << endl;
+		return;
+	}
 
-	if (time <= 0)
+	if (time < 0)
 	{
 		cout << "Tempo negativo non accettato." << endl;
 		return;
@@ -30,29 +31,30 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 	this->num_threads = num_threads;
 	this->transient_local = transient_local;
 	if (this->transient_local)
-		this->time = time;
+		this->time = time*1000000;// trasformo in nanosecondi
 	else
 		this->time = 0;
 
-	this->active_threads = 0; 
+	this->activated_threads = 0; 
 	this->queue_mex = (struct element<T>*)malloc(this->dim*sizeof(struct element<T>)); // coda di strutture
 	this->arrivals = (chrono::steady_clock::time_point*)malloc(this->num_threads*sizeof(chrono::steady_clock::time_point));
 	this->next_pop = (int*)malloc(this->num_threads*sizeof(int));
 	this->head = 0;
 	this->tail = 0;
 	this->empty = (sem_t*)malloc(this->num_threads*sizeof(sem_t));
+	this->finished_threads = (bool*)malloc(this->num_threads*sizeof(bool));
 	//allocazione dinamica della matrice
 	this->taken_mex = (bool**)malloc(this->num_threads*sizeof(bool*));		
 
 	for (int i = 0; i < this->num_threads; i++)
 	{
+		this->finished_threads[i] = false;
 		this->taken_mex[i] = (bool*)malloc(this->dim*sizeof(bool));
 		this->next_pop[i] = 0;
 		for (int j = 0; j < this->dim; j++)
 			this->taken_mex[i][j] = false; 
 	}
 
-	this->mex_wait = false;
 	this->num_mex_wait = 0;
 	this->vett_mex_wait = (int*)malloc(this->dim*sizeof(int));
 	for (int i = 0; i < this->dim; i++)
@@ -61,48 +63,46 @@ Queue_mex<T>::Queue_mex(size_t dim, int num_thread, bool transient_local, int ti
 
 	//inizializzo semafori
 
-	sem_init(&this->full, 0, this->dim);
 	sem_init(&this->mutex, 0, 1);
 	for (int i = 0; i < num_threads; i++)
 		sem_init(&this->empty[i], 0, 0);
-
-
 }
 
-
 //Distruttore
-
 template<class T>
 Queue_mex<T>::~Queue_mex()
 {
+	cout<< "Distruttore"<<endl;
+	for (int i = 0; i < this->num_threads; i++)
+		delete this->taken_mex[i];
+	delete this->taken_mex;
+
 	delete this->queue_mex;
 	delete this->arrivals;
 	delete this->next_pop;
 	delete this->empty;
 	delete this->vett_mex_wait;
 
-	for (int i = 0; i < this->num_threads; i++)
-		delete this->taken_mex[i];
-	delete this->taken_mex;
 }
 
-
-
+//segna l'arrivo del threads
 template<class T>
 int Queue_mex<T>::init_th()
 {
 	sem_wait(&this->mutex);
-	int tid = this->active_threads;
-	this->active_threads++;
+	int tid = this->activated_threads;
+	this->activated_threads++;
 	this->arrivals[tid] = chrono::steady_clock::now();//segno l'ora di join del thread
+	this->next_pop[tid]=this->tail;/////////////////////////////////////////aggiunto dopo
+	cout << tid <<"-> join" << endl;
 	
 	// nel momento dell'inserimento del messaggio viene inserito come già preso da parte di un thread non ancora arrivato
 	// e se sono ancora in tempo questo va modificato
 	for (int i = 0; i < this->num_mex; i++)
 	{
 		int index = (this->tail + i) % this->dim;
-		const auto diff = chrono::duration_cast<chrono::milliseconds>(this->arrivals[tid] - this->queue_mex[index].time).count();
-		
+		const auto diff = chrono::duration_cast<chrono::nanoseconds>(this->arrivals[tid] - this->queue_mex[index].time).count();
+		cout << diff<<" con mex " << i << endl;
 		if (diff <= this->time)
 		{
 			if (this->vett_mex_wait[index] == 1)
@@ -137,41 +137,62 @@ bool Queue_mex<T>::taken_all(int mex)
 	return finish;
 }
 
-// pop del messaggio parametrica del thread specifico
-template<class T>
-struct elemento Queue_mex<T>::pop_mex(int tid)
-{
-	//controllo se ci sono messaggi da leggere
-	int i = sem_trywait(&this->empty[tid]);
-	if (i == -1)
-	{
-		cout << tid << ": per il thread non ci sono messaggi da leggere" << endl;// cout utile per il debug
-		return NULL;
-	}
 
-	//ho almeno un messaggo da prendere, quindi next_pop indicherà sempre il primo messaggio disponibile
-	sem_wait(&this->mutex);
-	
-	struct elemento ret;
-	ret = this->queue_mex[this->next_pop[tid]];
-	this->taken_mex[tid][this->next_pop[tid]] = true;
-	const auto diff = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - queue_mex[this->next_pop[tid]].time).count();
+//controlla se i messaggi possono essere tolti dalla coda, e quindi considerati presi da tutti gli aventi diritto
+template<class T>
+void Queue_mex<T>::check_mex(int tid)
+{
+	const auto diff = chrono::duration_cast<chrono::nanoseconds>(chrono::steady_clock::now() - this->queue_mex[this->next_pop[tid]].time).count();
 	if (taken_all(this->next_pop[tid]))
 	{   
 		//// imposto le variabili di controllo
 		this->num_mex_wait++;
 		this->vett_mex_wait[this->next_pop[tid]] = 1;
-		if (this->active_threads == this->num_threads || diff > this->time)
+		if (this->activated_threads == this->num_threads || diff > this->time)
 		{
-			//il più vecchio messaggio che è ancora in coda è stato preso da tutti i thread ed è anche passato il tempo di late join o sono già arrivati tutti i threads.
+			//il più vecchio messaggio che è ancora in coda è stato preso da tutti i thread, ed è anche passato il tempo di late join o sono già arrivati tutti i threads.
 			this->num_mex_wait--;
 			this->vett_mex_wait[this->next_pop[tid]] = 0;
 
 			this->num_mex--;
+			cout << tid << "-> Messaggio liberato (" << this->queue_mex[this->tail].message << ") dalla coda, ora sono presenti " << this->num_mex << " messaggi" << endl;// utile per debug
+			cout << tid << "-> Messaggio liberato (" << this->queue_mex[this->next_pop[tid]].message << ") dalla coda, ora sono presenti " << this->num_mex << " messaggi" << endl;
 			this->tail = (this->tail + 1) % this->dim;
-			sem_post(&this->full);
+			
+			
 		}
+	}	
+}
+
+// pop del messaggio parametrica del thread specifico
+template<class T>
+struct element<T> Queue_mex<T>::pop_mex(int tid, int &controllo)
+{
+	controllo = 0;
+	struct element<T> ret;
+	//controllo se ci sono messaggi da leggere
+	int i = sem_trywait(&this->empty[tid]);
+	if (i == -1)
+	{
+		controllo = -1;
+		return ret;
 	}
+
+	//ho almeno un messaggo da prendere, devo prima controllare che next_pop non indichi ad un messaggio inserito da me o troppo vecchio
+	sem_wait(&this->mutex);
+	
+	//cerco il prossimo messaggio da prendere
+	while(this->taken_mex[tid][this->next_pop[tid]] == true)
+	{
+		this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
+	}
+	
+	ret = this->queue_mex[this->next_pop[tid]];
+	this->taken_mex[tid][this->next_pop[tid]] = true;
+	
+	//controllo se si può togliere il messaggio
+	check_mex(tid);
+
 	this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
 
 	sem_post(&this->mutex);
@@ -179,10 +200,18 @@ struct elemento Queue_mex<T>::pop_mex(int tid)
 	return ret;
 }
 
+template<class T>
+bool Queue_mex<T>::is_full()
+{
+	return (this->num_mex == this->dim);
+}
+
 ////inserimento messaggio nella coda, è bloccante con coda piena
 template<class T>
-void Queue_mex<T>::push_mex(struct elemento message, int tid)
+void Queue_mex<T>::push_mex(struct element<T> mex, int tid, int &controllo)
 {
+	controllo = 0;
+	
 	sem_wait(&this->mutex);
 
 	if (this->num_mex_wait > 0)
@@ -194,7 +223,7 @@ void Queue_mex<T>::push_mex(struct elemento message, int tid)
 		for (int i = 0; i < num_mex_wait; i++)
 		{
 			int index = (tail + i) % this->dim;
-			const auto diff = chrono::duration_cast<chrono::milliseconds>(now - queue_mex[index].time).count();
+			const auto diff = chrono::duration_cast<chrono::nanoseconds>(now - this->queue_mex[index].time).count();
 			if (diff > this->time)
 			{
 				this->num_mex_wait--;
@@ -202,36 +231,69 @@ void Queue_mex<T>::push_mex(struct elemento message, int tid)
 
 				this->num_mex--;
 				this->tail = (this->tail + 1) % this->dim;
-				sem_post(&this->full);
+				cout << tid <<"-> Messaggio liberato (" << this->queue_mex[index].message << ") dalla coda in push, ora sono presenti " << this->num_mex << " messaggi" << endl;// utile per il debug
 			}
 
 		}
 	}
-
-	// se mi devo bloccare devo rilasciare prima il mutex
-	if (this->num_mex == this->dim)
+	
+	// se non c'è spazio in coda devo uscire dalla funzione
+	if (is_full())
 	{
+		controllo=-1;
 		sem_post(&this->mutex);
-		sem_wait(&this->full);
-		sem_wait(&this->mutex);
+		return;
 	}
-	else sem_wait(this->full);
 
-	this->queue_mex[this->head] = message;
+	this->queue_mex[this->head] = mex;
 	this->num_mex++;
 
 	for (int i = 0; i < this->num_threads; i++)
 	{
-		if (i < this->active_threads && i != tid)
+		// se non  i trovo in uno di questi 3 casi segno il messaggio come già letto
+		if ((i < this->activated_threads) && (i != tid) && (!(this->finished_threads[i])))
 		{
 			this->taken_mex[i][this->head] = false;
+			cout << tid<< "-> post per " << i << endl;
 			sem_post(&this->empty[i]);
 		}
 		else
 			this->taken_mex[i][this->head] = true;
 	}
 	this->head = (this->head + 1) % this->dim;
-
+	
+	cout << tid <<  "-> Messaggio inserito in coda, ora sono presenti " << this->num_mex << " messaggi" << endl;// utile per il debug
+	
 	sem_post(&this->mutex);
 	return;
 }
+
+
+template<class T>
+void Queue_mex<T>::termination_th(int tid)
+{
+	sem_wait(&this->mutex);
+	
+	this->finished_threads[tid]=true;
+	
+	//se entro dentro vuol dire che ho dei messaggi non ancora letti e devo modificare le variabili prima di terminare
+	while ((sem_trywait(&this->empty[tid])) != -1)
+	{
+		//cerco il prossimo messaggio che avrei dovuto prendere
+		while(this->taken_mex[tid][this->next_pop[tid]] == true)
+		{
+			this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
+		}
+
+		this->taken_mex[tid][this->next_pop[tid]] = true;
+		
+		//controllo se si può togliere il messaggio
+		check_mex(tid);
+		this->next_pop[tid] = (this->next_pop[tid] + 1) % this->dim;
+	}
+	
+	sem_post(&this->mutex);
+	
+	return;
+}
+
