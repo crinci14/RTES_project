@@ -14,13 +14,13 @@ using namespace std;
 
 ////variabile globale
 /////////////////////dim,  num_th,      modalità,     time
-Queue_mex<int> queue(DIM ,NUM_THREADS, TRANSIENT_LOCAL, TIME);
+Queue_mex<int> queue(DIM, NUM_THREADS, TRANSIENT_LOCAL, TIME);
 
 void pausetta()
 {
 	struct timespec t;
 	t.tv_sec = 0;
-	t.tv_nsec = (rand() % 10) * 1000000;
+	t.tv_nsec = (rand() % 10 + 1) * 1000000;
 	nanosleep(&t, NULL);
 }
 
@@ -35,7 +35,7 @@ void* client(void* arg)
 		//faccio pop finchè ho messaggi da prendere, al primo vuoto mi fermo
 		do {
 			mex = queue.pop_mex(tid, controllo);
-			if(controllo != -1)
+			if (controllo != -1)
 			{
 				cout << tid << "-> letto messaggio: " << mex.message << endl;
 			}
@@ -43,16 +43,16 @@ void* client(void* arg)
 			{
 				cout << tid << "-> non ci sono messaggi da leggere" << endl;// cout utile per il debug
 			}
-		}while (controllo != -1);
-		
+		} while (controllo != -1);
+
 		if ((rand() % 10) < 5)
 		{
 			mex.time = chrono::steady_clock::now();
-			mex.message=rand() % 100;
+			mex.message = rand() % 100;
 			queue.push_mex(mex, tid, controllo);
-			if(controllo != -1)
+			if (controllo != -1)
 			{
-				cout << tid << "-> ho inserito un messaggio: " << mex.message << endl;//cout utile per il debug
+				cout << tid << "-> ho inserito un messaggio: " << mex.message << endl;//out utile per il debug
 			}
 			else
 			{
@@ -64,11 +64,10 @@ void* client(void* arg)
 		pausetta();
 	}
 	queue.termination_th(tid);//non si dovrà più aspettare che questo threads riceva i messaggi
-	cout<< tid << "-> terminato" << endl;
-	
+	cout << tid << "-> terminato" << endl;
+
 	return NULL;
 }
-
 
 int main()
 {
@@ -80,7 +79,7 @@ int main()
 	pthread_attr_init(&a);
 
 	for (int i = 0; i < NUM_THREADS; i++)
-	{		
+	{
 		pthread_create(&p[i], &a, client, NULL);
 		pausetta();
 	}

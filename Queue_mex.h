@@ -27,7 +27,7 @@ struct element{
 template<class T> class Queue_mex{
 public:
 
-	Queue_mex(size_t dim = 50,int num_thread = 10, bool transient_local = TRANSIENT_LOCAL, int time = 10 );
+	Queue_mex(size_t dim = 50, int num_thread = 10, bool transient_local = TRANSIENT_LOCAL, int time = 10);
 	~Queue_mex();
 
 	int init_th();// segna il tempo di arrivo di ogni threads e aggiusta, se necessario, delle variabili
@@ -38,10 +38,10 @@ public:
 	bool is_full();// ci dice se la coda è piena
 	bool taken_all(int mex);
 	void check_mex(int tid);
-	
+
 
 private:
-
+	int cont;
 	size_t dim;
 	bool transient_local;// il transient_local da il diritto a un thread che arriva dopo (in base a quanto dice time) al messaggio di poterlo leggere
 	int time;// in millisecondi
@@ -58,6 +58,8 @@ private:
 	int num_mex_wait;//ci dice quanti messaggi sono presi da tutti ma non è ancora scaduto il tempo di late join
 	int *vett_mex_wait;//collegato a num_mex_wait ci dice quali messaggi sono in questa situazione
 	bool *finished_threads;//vettore dei threads che sono già terminati e che quindi non verranno aspettati
+	int num_tail_wait;// ci dice quanti messaggi sono pronti per essere tolti dalla coda ma non sono il primo messaggio indicato da tail
+	bool *vett_tail_wait;//collegato a num_tail_wait ci dice quali messaggi sono in questa situazione
 
 	sem_t *empty;//un semaforo per ogni thread, ci dice se per quel thread c'è o no un messaggio da prendere
 	sem_t mutex;// semaforo di mutua esclusione nell'accesso alla coda e a variabili usate da tutti
