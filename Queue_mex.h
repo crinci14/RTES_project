@@ -39,8 +39,8 @@ public:
 private:
 	//procedure usate internamente da altre funzioni
 	bool is_full();// ci dice se la coda è piena
-	bool taken_all(int mex);
-	void check_mex(int tid);
+	bool taken_all(int mex);// ci dice se il messaggio lo hanno preso tutti gli aventi diritto
+	void check_mex(int tid);// controlla se è possibile liberare dei messaggi dalla coda
 
 	//variabili interne
 	size_t dim;// dimensione della coda

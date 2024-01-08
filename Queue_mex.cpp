@@ -95,7 +95,7 @@ int Queue_mex<T>::init_th()
 	this->activated_threads++;
 	this->arrivals[tid] = chrono::steady_clock::now();//segno l'ora di join del thread
 	this->next_pop[tid]=this->tail;//inizializzo partendo da tail
-	cout << tid <<"-> join" << endl;
+	cout << tid <<"-> join" << endl;// utile per il debug
 	
 	// nel momento dell'inserimento, un messaggio viene inserito come già preso da parte di un thread non ancora arrivato
 	// e se ora sono ancora in tempo questo andrà modificato
@@ -103,7 +103,7 @@ int Queue_mex<T>::init_th()
 	{
 		int index = (this->tail + i) % this->dim;
 		const auto diff = chrono::duration_cast<chrono::nanoseconds>(this->arrivals[tid] - this->queue_mex[index].time).count();
-		cout << diff <<" con mex " << i << endl;//utile per il debug
+		cout << diff <<"(ns) con il messaggio " << i << endl;//utile per il debug
 		if (diff <= this->time)
 		{
 			if (this->vett_mex_wait[index] == true)
@@ -137,7 +137,7 @@ bool Queue_mex<T>::taken_all(int mex)
 }
 
 
-//controlla se i messaggi possono essere tolti dalla coda, e quindi considerati presi da tutti gli aventi diritto
+//controlla se i messaggi sono considerati presi da tutti gli aventi diritto, e quindi se possono essere tolti dalla coda
 template<class T>
 void Queue_mex<T>::check_mex(int tid)
 {
@@ -242,7 +242,7 @@ void Queue_mex<T>::push_mex(struct element<T> mex, int tid, int &controllo)
 					this->vett_tail_wait[index]=false;
 					this->num_mex--;
 					//per debug
-					cout << tid <<"-> Messaggio liberato (" << this->queue_mex[index].message << ") dalla coda in push, ora sono presenti " << this->num_mex << " messaggi" << endl;// utile per il debug
+					cout << tid <<"-> Messaggio liberato (" << this->queue_mex[index].message << ") dalla coda durante la push, ora sono presenti " << this->num_mex << " messaggi" << endl;// utile per il debug
 					
 					this->tail = (this->tail + 1) % this->dim;
 				}
@@ -256,8 +256,7 @@ void Queue_mex<T>::push_mex(struct element<T> mex, int tid, int &controllo)
 		this->num_tail_wait--;
 		this->vett_tail_wait[this->tail]=false;
 		this->num_mex--;
-		cout << "ho usato tail wait, ora ci sono "<< this->num_mex << " messaggi" << endl;
-		cout << "liberato messaggio " << this->queue_mex[this->tail].message  << endl;
+		cout << "Messaggio liberato (" << this->queue_mex[this->tail].message << ") con il vettore tail wait, ora ci sono "<< this->num_mex << " messaggi" << endl;// utile per il debug
 		this->tail = (this->tail + 1) % this->dim;		
 	}
 	
@@ -271,15 +270,15 @@ void Queue_mex<T>::push_mex(struct element<T> mex, int tid, int &controllo)
 
 	this->queue_mex[this->head] = mex;// inserisco il messaggio in coda 
 	this->num_mex++;
-	bool unico=true;//ci dice se chi inserisce il messaggio � l'unico threads attivo
+	bool unico=true;//ci dice se chi inserisce il messaggio è l'unico threads attivo
 	for (int i = 0; i < this->num_threads; i++)
 	{
-		// se non  mi trovo in uno di questi 3 casi segno il messaggio come gi� letto
+		// se non mi trovo in anche solo uno di questi 3 casi segno il messaggio come già letto
 		if ((i < this->activated_threads) && (i != tid) && (!(this->finished_threads[i])))
 		{
 			unico=false;
 			this->taken_mex[i][this->head] = false;
-			cout << tid<< "-> post per " << i << endl;
+			//cout << tid<< "-> post per " << i << endl;// utile per il debug
 			sem_post(&this->empty[i]);
 		}
 		else
